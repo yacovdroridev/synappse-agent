@@ -12,6 +12,7 @@ from datetime import datetime
 
 from . import whatsapp
 from .config import settings
+from . import metering
 from .llm import get_provider
 from .models import Conversation, Customer, Message, Tenant
 
@@ -51,6 +52,10 @@ class Engine:
         self.db = db
         self.provider = provider or get_provider()
         self.sender = sender or whatsapp.send_text
+
+    def _send(self, tenant: Tenant, to: str, text: str, category: str = "service"):
+        self.sender(tenant.phone_number_id, to, text)
+        metering.record_outbound(self.db, tenant.id, category)
 
     def _get_or_create(self, tenant: Tenant, wa_id: str, name: str):
         customer = (self.db.query(Customer)
@@ -100,9 +105,9 @@ class Engine:
         if reply.wants_human:
             convo.mode = "human"
             customer.status = "handed_off"
-            self.sender(tenant.phone_number_id, tenant.owner_phone,
-                        "\u05d1\u05e7\u05e9\u05ea \u05e0\u05e6\u05d9\u05d2: %s (%s) \u05de\u05d1\u05e7\u05e9 \u05dc\u05d3\u05d1\u05e8 \u05e2\u05dd \u05d1\u05df \u05d0\u05d3\u05dd. \u05d4\u05e9\u05d9\u05d7\u05d4 \u05d4\u05d5\u05e2\u05d1\u05e8\u05d4 \u05d0\u05dc\u05d9\u05da."
-                        % (customer.name or "\u05dc\u05dc\u05d0 \u05e9\u05dd", customer.wa_id))
+            self._send(tenant, tenant.owner_phone,
+                       "\u05d1\u05e7\u05e9\u05ea \u05e0\u05e6\u05d9\u05d2: %s (%s) \u05de\u05d1\u05e7\u05e9 \u05dc\u05d3\u05d1\u05e8 \u05e2\u05dd \u05d1\u05df \u05d0\u05d3\u05dd. \u05d4\u05e9\u05d9\u05d7\u05d4 \u05d4\u05d5\u05e2\u05d1\u05e8\u05d4 \u05d0\u05dc\u05d9\u05da."
+                       % (customer.name or "\u05dc\u05dc\u05d0 \u05e9\u05dd", customer.wa_id))
 
         was_hot = customer.status == "hot"
         if customer.status not in ("handed_off", "closed"):
@@ -111,13 +116,13 @@ class Engine:
             elif is_qualified(customer):
                 customer.status = "qualified"
 
-        self.sender(tenant.phone_number_id, wa_from, reply.reply)
+        self._send(tenant, wa_from, reply.reply)
         self.db.add(Message(conversation_id=convo.id, direction="out", body=reply.reply,
                             tier=tier, confidence=reply.confidence))
 
         newly_hot = customer.status == "hot" and not was_hot
         if newly_hot:
-            self.sender(tenant.phone_number_id, tenant.owner_phone, lead_summary(customer))
+            self._send(tenant, tenant.owner_phone, lead_summary(customer))
 
         customer.updated_at = datetime.utcnow()
         self.db.commit()

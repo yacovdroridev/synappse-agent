@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -79,3 +79,22 @@ class Message(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     conversation = relationship("Conversation", back_populates="messages")
+
+
+class UsageCounter(Base):
+    """Per-tenant monthly WhatsApp message metering.
+
+    Meta pricing change (Oct 1, 2026): service messages stop being
+    unlimited-free - 1,000 free per phone number per month, then billed at
+    the local utility/authentication rate; utility templates inside the open
+    24h window become billable too. We count outbound messages per tenant per
+    month so every client sees usage before it becomes a bill.
+    """
+    __tablename__ = "usage_counters"
+    __table_args__ = (UniqueConstraint("tenant_id", "month", name="uq_usage_tenant_month"),)
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    month = Column(String(7), nullable=False)  # UTC "YYYY-MM"
+    service_messages = Column(Integer, default=0)   # non-template messages inside the window
+    template_messages = Column(Integer, default=0)  # template sends (billable per-message)

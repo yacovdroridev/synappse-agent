@@ -77,6 +77,31 @@ app/
 tests/           pytest: engine, webhook, dashboard, admin auth
 ```
 
+## WhatsApp pricing change - October 1, 2026 (launch blocker)
+
+Meta ends unlimited-free service messages on **Oct 1, 2026**:
+
+- **Service messages** (our agent's replies inside the 24h window, free since
+  Nov 2024) become billable: **1,000 free per phone number per month**, then the
+  local utility/authentication rate. Allowance resets monthly, no rollover.
+- **Utility templates** sent inside an open window become billable too.
+- **Payment method on file by Sept 30, 2026** - without one, Meta stops
+  delivering service messages from Oct 1. Set this up in the BSP (Twilio /
+  360dialog) console when the account is opened, not later.
+
+What this repo does about it: every outbound message is metered per tenant per
+month (`usage_counters` table). The tenant dashboard shows this month's service
+messages against the 1,000 free allowance (green / amber at 80% / red past it)
+plus template sends; `/api/{slug}/stats` exposes the same numbers for alerts.
+
+Cost check against the spec's model: a client at ~150 conversations x ~8 turns
+is ~1,200 service messages/month - just past the free tier, so expect a small
+per-client Meta charge (utility rate) on top of LLM costs. Still negligible
+against the ₪750/$199 monthly price, but no longer exactly zero.
+
+Sources: developers.facebook.com/docs/whatsapp/pricing (and the non-template
+messages pricing doc), 360dialog/Twilio pricing-change notices.
+
 ## MVP scope guardrails (from the spec)
 
 - Inbound only — no proactive marketing messages in MVP (keeps quality rating safe).

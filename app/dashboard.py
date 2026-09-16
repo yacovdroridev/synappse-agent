@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from . import metering
 from .config import settings
 from .db import get_db
 from .models import Conversation, Customer, Tenant
@@ -63,6 +64,21 @@ def dashboard(slug: str, db: Session = Depends(get_db)):
         convo_blocks.append("<div class='card'><b>%s</b> (%s) <small>%s</small>%s</div>" % (
             cv.customer.name or cv.customer.wa_id, cv.customer.wa_id, mode, msgs))
 
+    usage = metering.get_usage(db, t.id)
+    used = usage["service_messages"]
+    free = usage["free_allowance"]
+    if used >= free:
+        ucolor = "#dc2626"
+    elif used >= 0.8 * free:
+        ucolor = "#d97706"
+    else:
+        ucolor = "#059669"
+    usage_card = (
+        "<div class='stat'><b style='color:%s'>%s / %s</b>הודעות שירות החודש (חינם עד %s)</div>"
+        "<div class='stat'><b>%d</b>הודעות תבנית החודש</div>"
+    ) % (ucolor, "{:,}".format(used), "{:,}".format(free), "{:,}".format(free),
+         usage["template_messages"])
+
     toggle = ("<form method='post' action='/dashboard/%s/resume'><button class='resume'>\u05d4\u05e4\u05e2\u05dc \u05e1\u05d5\u05db\u05df</button></form>" % slug
               if t.agent_paused else
               "<form method='post' action='/dashboard/%s/pause'><button class='pause'>\u05e2\u05e6\u05d5\u05e8 \u05e1\u05d5\u05db\u05df</button></form>" % slug)
@@ -74,7 +90,7 @@ def dashboard(slug: str, db: Session = Depends(get_db)):
         "<div class='stat'><b>%d</b>\u05de\u05d5\u05e1\u05de\u05db\u05d9\u05dd</div>"
         "<div class='stat'><b>%d</b>\u05d7\u05de\u05d9\u05dd</div>"
         "<div class='stat'><b>%d</b>\u05d4\u05d5\u05e2\u05d1\u05e8\u05d5 \u05d0\u05dc\u05d9\u05da</div>"
-        "</div>"
+        "%s</div>"
         "<div class='card'><h3>\u05dc\u05d9\u05d3\u05d9\u05dd</h3><table>"
         "<tr><th>\u05e9\u05dd</th><th>\u05d8\u05dc\u05e4\u05d5\u05df</th><th>\u05e9\u05d9\u05e8\u05d5\u05ea</th><th>\u05d3\u05d7\u05d9\u05e4\u05d5\u05ea</th><th>\u05d0\u05d6\u05d5\u05e8</th><th>\u05e1\u05d8\u05d8\u05d5\u05e1</th></tr>%s</table></div>"
         "<h3>\u05e9\u05d9\u05d7\u05d5\u05ea \u05d0\u05d7\u05e8\u05d5\u05e0\u05d5\u05ea</h3>%s</main>"
@@ -83,7 +99,7 @@ def dashboard(slug: str, db: Session = Depends(get_db)):
         "\u05d4\u05e1\u05d5\u05db\u05df \u05de\u05d5\u05e9\u05d4\u05d4" if t.agent_paused else "\u05d4\u05e1\u05d5\u05db\u05df \u05e4\u05e2\u05d9\u05dc",
         toggle,
         len(customers), count("qualified"), count("hot"), count("handed_off"),
-        "".join(rows), "".join(convo_blocks),
+        usage_card, "".join(rows), "".join(convo_blocks),
     )
     return PAGE % {"title": t.business_name, "body": body}
 
@@ -109,7 +125,7 @@ def stats(slug: str, db: Session = Depends(get_db)):
     t = _tenant_or_404(slug, db)
     customers = db.query(Customer).filter_by(tenant_id=t.id).all()
     out = {"tenant": t.slug, "business": t.business_name, "paused": t.agent_paused,
-           "total_leads": len(customers)}
+           "total_leads": len(customers), "usage": metering.get_usage(db, t.id)}
     for c in customers:
         out[c.status] = out.get(c.status, 0) + 1
     return out
